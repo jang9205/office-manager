@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      th:replace="~{fragments/layout :: shell('사원관리', ~{::main})}">
+<main>
+    <section class="page-heading">
+        <div><h2>사원 목록</h2><p>사원 정보를 검색하고 계정과 권한을 관리합니다.</p></div>
+        <div class="page-actions" sec:authorize="hasAuthority('EMPLOYEE:CREATE')">
+            <a class="button secondary" th:href="@{/excel/employees}">↓ 엑셀 다운로드</a>
+            <button class="button secondary" data-modal-open="employeeImportModal">↑ 엑셀 업로드</button>
+            <button class="button primary" data-modal-open="employeeModal" data-new-employee>＋ 사원 등록</button>
+        </div>
+    </section>
+
+    <form class="filter-form" th:action="@{/employees}" method="get" style="margin-bottom:14px">
+        <input type="search" name="keyword" th:value="${keyword}" placeholder="이름, 사번, 이메일 검색">
+        <select name="departmentId"><option value="">전체 부서</option><option th:each="item : ${departments}" th:value="${item.departmentId}" th:selected="${item.departmentId == departmentId}" th:text="${item.departmentName}"></option></select>
+        <select name="positionId"><option value="">전체 직급</option><option th:each="item : ${positions}" th:value="${item.positionId}" th:selected="${item.positionId == positionId}" th:text="${item.positionName}"></option></select>
+        <button class="button secondary" type="submit">검색</button>
+    </form>
+
+    <article class="card">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>사원</th><th>부서 / 직급</th><th>연락처</th><th>입사일</th><th>권한</th><th>상태</th><th></th></tr></thead>
+                <tbody>
+                <tr th:each="employee : ${employees.content}">
+                    <td><div class="table-person"><span class="mini-avatar" th:text="${#strings.substring(employee.employeeName,0,1)}">이</span><span><strong th:text="${employee.employeeName}">이사원</strong><small th:text="${employee.employeeNumber}">E0001</small></span></div></td>
+                    <td><strong th:text="${employee.departmentName ?: '-'}">개발팀</strong><br><small th:text="${employee.positionName ?: '-'}">사원</small></td>
+                    <td><span th:text="${employee.email}">mail</span><br><small th:text="${employee.phone ?: '-'}">010</small></td>
+                    <td th:text="${@viewDate.format(employee.hireDate,'yyyy.MM.dd')}">2025.01.01</td>
+                    <td th:text="${employee.roleNames ?: '계정 없음'}">사원</td>
+                    <td><span class="status" th:classappend="${#strings.toLowerCase(employee.employmentStatus)}" th:text="${employee.employmentStatus == 'ACTIVE' ? '재직' : (employee.employmentStatus == 'RESIGNED' ? '퇴사' : '휴직')}">재직</span></td>
+                    <td><div class="row-actions" sec:authorize="hasAuthority('EMPLOYEE:UPDATE')">
+                        <button class="button secondary small" type="button" data-edit-employee data-modal-open="employeeModal"
+                                th:attr="data-id=${employee.employeeId},data-number=${employee.employeeNumber},data-name=${employee.employeeName},data-email=${employee.email},data-phone=${employee.phone},data-department=${employee.departmentId},data-position=${employee.positionId},data-hire=${employee.hireDate},data-status=${employee.employmentStatus},data-type=${employee.employmentType}">수정</button>
+                        <button sec:authorize="hasAuthority('ACCOUNT:MANAGE')" class="button secondary small" type="button" data-reset-password data-modal-open="passwordResetModal" th:attr="data-id=${employee.employeeId},data-name=${employee.employeeName}">PW 초기화</button>
+                        <button class="button danger small" type="button" th:attr="data-api-action=@{/api/v1/employees/{id}(id=${employee.employeeId})}" data-method="DELETE" data-confirm="정말 이 사원을 삭제할까요?">삭제</button>
+                    </div></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(employees.content)}"><div class="empty-icon">♟</div><strong>검색 결과가 없습니다</strong><p>조건을 변경해 다시 검색해 보세요.</p></div>
+        <nav class="pagination" th:if="${employees.totalPages() > 1}">
+            <a th:classappend="${!employees.hasPrevious()} ? 'disabled'" th:href="@{/employees(page=${employees.page - 1},keyword=${keyword},departmentId=${departmentId},positionId=${positionId})}">‹</a>
+            <span class="current" th:text="${employees.page}">1</span><span th:text="${'/' + employees.totalPages()}">/2</span>
+            <a th:classappend="${!employees.hasNext()} ? 'disabled'" th:href="@{/employees(page=${employees.page + 1},keyword=${keyword},departmentId=${departmentId},positionId=${positionId})}">›</a>
+        </nav>
+    </article>
+
+    <div class="modal" id="employeeModal">
+        <div class="modal-dialog wide">
+            <header class="modal-header"><div><h3 data-employee-modal-title>새 사원 등록</h3><p>기본 정보와 로그인 계정을 함께 생성할 수 있습니다.</p></div><button class="modal-close" data-modal-close>×</button></header>
+            <form id="employeeForm" th:action="@{/api/v1/employees}" method="post" data-json-form data-success-url="/employees">
+                <div class="modal-body form-grid">
+                    <div class="field"><label>사번 *</label><input name="employeeNumber" maxlength="30" required></div>
+                    <div class="field"><label>이름 *</label><input name="employeeName" maxlength="50" required></div>
+                    <div class="field"><label>이메일 *</label><input type="email" name="email" required></div>
+                    <div class="field"><label>연락처</label><input name="phone" placeholder="010-0000-0000"></div>
+                    <div class="field"><label>부서</label><select name="departmentId"><option value="">미지정</option><option th:each="item : ${departments}" th:value="${item.departmentId}" th:text="${item.departmentName}"></option></select></div>
+                    <div class="field"><label>직급</label><select name="positionId"><option value="">미지정</option><option th:each="item : ${positions}" th:value="${item.positionId}" th:text="${item.positionName}"></option></select></div>
+                    <div class="field"><label>입사일 *</label><input type="date" name="hireDate" required></div>
+                    <div class="field"><label>고용 형태</label><select name="employmentType"><option value="FULL_TIME">정규직</option><option value="CONTRACT">계약직</option><option value="INTERN">인턴</option><option value="PART_TIME">시간제</option></select></div>
+                    <div class="field"><label>재직 상태</label><select name="employmentStatus"><option value="ACTIVE">재직</option><option value="LEAVE_OF_ABSENCE">휴직</option><option value="RESIGNED">퇴사</option></select></div>
+                    <div class="field account-field"><label>권한</label><select name="roleCode"><option value="ROLE_EMPLOYEE">사원</option><option value="ROLE_MANAGER">팀장</option><option value="ROLE_ADMIN">관리자</option></select></div>
+                    <div class="field account-field"><label>로그인 ID</label><input name="loginId" maxlength="100"><small>비워두면 계정을 생성하지 않습니다.</small></div>
+                    <div class="field account-field"><label>초기 비밀번호</label><input type="password" name="initialPassword" minlength="8"></div>
+                    <div class="field span-2"><label>메모</label><textarea name="memo"></textarea></div>
+                </div>
+                <footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">저장</button></footer>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="passwordResetModal">
+        <div class="modal-dialog">
+            <header class="modal-header"><div><h3>비밀번호 초기화</h3><p><strong data-password-reset-name>사원</strong> 계정에 임시 비밀번호를 설정합니다.</p></div><button class="modal-close" data-modal-close>×</button></header>
+            <form id="passwordResetForm" method="post" data-json-form data-success-url="/employees">
+                <div class="modal-body"><div class="field"><label>새 임시 비밀번호 *</label><input type="password" name="newPassword" minlength="8" maxlength="100" required autocomplete="new-password"><small>다음 로그인 후 본인이 변경하도록 안내해 주세요.</small></div></div>
+                <footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">초기화</button></footer>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="employeeImportModal">
+        <div class="modal-dialog">
+            <header class="modal-header"><div><h3>사원 엑셀 업로드</h3><p>사번·이름·이메일·연락처·부서코드·직급코드·입사일 순으로 작성하세요.</p></div><button class="modal-close" data-modal-close>×</button></header>
+            <form th:action="@{/excel/employees/import}" method="post" enctype="multipart/form-data" data-multipart-form>
+                <div class="modal-body"><div class="field"><label>Excel 파일</label><input type="file" name="file" accept=".xlsx" required><small>8열 로그인 ID와 9열 초기 비밀번호는 선택사항입니다.</small></div></div>
+                <footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">업로드</button></footer>
+            </form>
+        </div>
+    </div>
+</main>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('대시보드', ~{::main})}">
+<main>
+    <section class="page-heading">
+        <div>
+            <h2><span th:text="${currentUser.employeeName()}">이사원</span>님, 좋은 하루예요!</h2>
+            <p>오늘의 근무 현황과 놓치면 안 될 업무를 한눈에 확인하세요.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button secondary" th:href="@{/calendar}">□ 일정 확인</a>
+            <button class="button primary" type="button" data-modal-open="quickApprovalModal">＋ 결재 작성</button>
+        </div>
+    </section>
+
+    <section class="grid grid-4">
+        <article class="card metric-card">
+            <div class="metric-top"><span class="metric-label">오늘 출근</span><span class="metric-icon">↗</span></div>
+            <div class="metric-value"><span th:text="${stats.todayAttendance}">0</span><small>명</small></div>
+            <div class="metric-foot">실시간 출근 처리 기준</div>
+        </article>
+        <article class="card metric-card success">
+            <div class="metric-top"><span class="metric-label">오늘 휴가</span><span class="metric-icon">☀</span></div>
+            <div class="metric-value"><span th:text="${stats.todayLeave}">0</span><small>명</small></div>
+            <div class="metric-foot">승인 완료된 휴가자</div>
+        </article>
+        <article class="card metric-card warning">
+            <div class="metric-top"><span class="metric-label">결재 대기</span><span class="metric-icon">✓</span></div>
+            <div class="metric-value"><span th:text="${stats.pendingApprovals}">0</span><small>건</small></div>
+            <div class="metric-foot">내가 처리해야 할 문서</div>
+        </article>
+        <article class="card metric-card info">
+            <div class="metric-top"><span class="metric-label">읽지 않은 알림</span><span class="metric-icon">♢</span></div>
+            <div class="metric-value"><span th:text="${stats.unreadNotifications}">0</span><small>개</small></div>
+            <div class="metric-foot">최근 업무 업데이트</div>
+        </article>
+    </section>
+
+    <section class="grid dashboard-layout" style="margin-top:18px">
+        <div class="grid">
+            <article class="card">
+                <header class="card-header">
+                    <div><h3>결재 대기 문서</h3><p>처리가 필요한 문서를 확인하세요.</p></div>
+                    <a class="text-button" th:href="@{/approvals}">전체보기 →</a>
+                </header>
+                <div class="list">
+                    <a class="list-item" th:each="item : ${approvals}"
+                       th:href="@{/approvals/{id}(id=${item.documentId})}">
+                        <span class="list-icon">✓</span>
+                        <span class="list-copy"><strong th:text="${item.title}">휴가 신청</strong>
+                            <small><span th:text="${item.drafterName}">이사원</span> · <span th:text="${item.documentType}">LEAVE</span></small></span>
+                        <span class="status pending">대기</span>
+                    </a>
+                    <div class="empty-state" th:if="${#lists.isEmpty(approvals)}">
+                        <div class="empty-icon">✓</div><strong>처리할 결재가 없습니다</strong><p>모든 업무를 처리했어요.</p>
+                    </div>
+                </div>
+            </article>
+
+            <article class="card">
+                <header class="card-header">
+                    <div><h3>최근 공지사항</h3><p>회사에서 전하는 주요 소식입니다.</p></div>
+                    <a class="text-button" th:href="@{/notices}">전체보기 →</a>
+                </header>
+                <div class="list">
+                    <a class="list-item" th:each="notice : ${notices}"
+                       th:href="@{/notices/{id}(id=${notice.noticeId})}">
+                        <span class="list-icon" th:text="${notice.pinned ? '!' : '◉'}">◉</span>
+                        <span class="list-copy"><strong><span class="notice-pin" th:if="${notice.pinned}">[중요] </span><span th:text="${notice.title}">공지 제목</span></strong>
+                            <small><span th:text="${notice.authorName}">관리자</span> · 조회 <span th:text="${notice.viewCount}">0</span></small></span>
+                        <span class="list-meta" th:text="${notice.publishedAt == null ? '' : @viewDate.format(notice.publishedAt, 'M.d')}">8.6</span>
+                    </a>
+                    <div class="empty-mini" th:if="${#lists.isEmpty(notices)}">등록된 공지사항이 없습니다.</div>
+                </div>
+            </article>
+        </div>
+
+        <aside class="grid">
+            <article class="card">
+                <header class="card-header"><div><h3>다가오는 일정</h3><p>7일 이내 일정</p></div><a class="text-button" th:href="@{/calendar}">캘린더 →</a></header>
+                <div class="list">
+                    <div class="list-item" th:each="event : ${events}">
+                        <span class="list-icon" th:text="${@viewDate.format(event.startsAt, 'd')}">6</span>
+                        <span class="list-copy"><strong th:text="${event.title}">팀 회의</strong>
+                            <small><span th:text="${@viewDate.format(event.startsAt, 'M월 d일 HH:mm')}">8월 6일</span>
+                                <span th:if="${event.location}" th:text="${' · ' + event.location}"></span></small></span>
+                    </div>
+                    <div class="empty-mini" th:if="${#lists.isEmpty(events)}">다가오는 일정이 없습니다.</div>
+                </div>
+            </article>
+
+            <article class="card">
+                <header class="card-header"><div><h3>부서별 인원</h3><p>현재 재직 인원 기준</p></div></header>
+                <div class="card-body progress-list">
+                    <div class="progress-row" th:each="department : ${departmentStats}">
+                        <label th:text="${department.departmentName}">개발팀</label>
+                        <div class="progress-track"><div class="progress-bar" th:style="${'--count:' + department.employeeCount}"></div></div>
+                        <span th:text="${department.employeeCount + '명'}">3명</span>
+                    </div>
+                </div>
+            </article>
+        </aside>
+    </section>
+
+    <div class="modal" id="quickApprovalModal">
+        <div class="modal-dialog">
+            <header class="modal-header"><div><h3>새 결재 문서</h3><p>간단한 일반 결재를 요청합니다.</p></div><button class="modal-close" data-modal-close>×</button></header>
+            <form th:action="@{/content/approvals}" method="post" enctype="multipart/form-data" data-multipart-form>
+                <div class="modal-body form-grid">
+                    <div class="field span-2"><label>제목</label><input name="title" maxlength="200" required placeholder="결재 제목을 입력하세요"></div>
+                    <div class="field span-2"><label>내용</label><textarea name="content" required placeholder="요청 내용을 자세히 작성하세요"></textarea></div>
+                    <div class="field span-2"><label>첨부파일</label><input type="file" name="file"><small>최대 10MB, 문서·이미지·압축 파일을 첨부할 수 있습니다.</small></div>
+                </div>
+                <footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">결재 요청</button></footer>
+            </form>
+        </div>
+    </div>
+</main>
+</html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      th:fragment="shell(pageTitle, content)">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="_csrf" th:content="${_csrf.token}">
+    <meta name="_csrf_header" th:content="${_csrf.headerName}">
+    <title th:text="${pageTitle + ' · Workly'}">Workly</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<div class="app-shell">
+    <div class="sidebar-backdrop" data-sidebar-close></div>
+    <aside class="sidebar" id="sidebar">
+        <a class="brand" th:href="@{/dashboard}" aria-label="Workly 홈">
+            <span class="brand-mark">W</span>
+            <span>
+                <strong>Workly</strong>
+                <small>Office Manager</small>
+            </span>
+        </a>
+
+        <nav class="side-nav" aria-label="주 메뉴">
+            <p class="nav-label">WORKSPACE</p>
+            <a th:href="@{/dashboard}" th:classappend="${currentPath == '/dashboard'} ? ' active'">
+                <span class="nav-icon">▦</span><span>대시보드</span>
+            </a>
+            <a sec:authorize="hasAnyAuthority('EMPLOYEE:READ_ALL','EMPLOYEE:READ_TEAM')"
+               th:href="@{/employees}" th:classappend="${#strings.startsWith(currentPath, '/employees')} ? ' active'">
+                <span class="nav-icon">♟</span><span>사원관리</span>
+            </a>
+            <a th:href="@{/organization}" th:classappend="${currentPath == '/organization'} ? ' active'">
+                <span class="nav-icon">⌘</span><span>조직관리</span>
+            </a>
+            <a th:href="@{/leaves}" th:classappend="${currentPath == '/leaves'} ? ' active'">
+                <span class="nav-icon">☀</span><span>연차관리</span>
+            </a>
+            <a th:href="@{/approvals}" th:classappend="${#strings.startsWith(currentPath, '/approvals')} ? ' active'">
+                <span class="nav-icon">✓</span><span>전자결재</span>
+                <span class="nav-count" th:if="${pendingApprovalCount != null and pendingApprovalCount > 0}"
+                      th:text="${pendingApprovalCount}">0</span>
+            </a>
+            <a th:href="@{/attendance}" th:classappend="${currentPath == '/attendance'} ? ' active'">
+                <span class="nav-icon">◷</span><span>근태관리</span>
+            </a>
+
+            <p class="nav-label">COLLABORATION</p>
+            <a th:href="@{/notices}" th:classappend="${#strings.startsWith(currentPath, '/notices')} ? ' active'">
+                <span class="nav-icon">◉</span><span>공지사항</span>
+            </a>
+            <a th:href="@{/resources}" th:classappend="${currentPath == '/resources'} ? ' active'">
+                <span class="nav-icon">▰</span><span>자료실</span>
+            </a>
+            <a th:href="@{/calendar}" th:classappend="${currentPath == '/calendar'} ? ' active'">
+                <span class="nav-icon">□</span><span>일정관리</span>
+            </a>
+            <a th:href="@{/messages}" th:classappend="${currentPath == '/messages'} ? ' active'">
+                <span class="nav-icon">✉</span><span>사내쪽지</span>
+            </a>
+
+            <p class="nav-label">ACCOUNT</p>
+            <a th:href="@{/my-page}" th:classappend="${currentPath == '/my-page'} ? ' active'">
+                <span class="nav-icon">●</span><span>마이페이지</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-profile">
+            <div class="avatar" th:text="${#strings.substring(currentUser.employeeName(), 0, 1)}">이</div>
+            <div class="profile-copy">
+                <strong th:text="${currentUser.employeeName()}">이사원</strong>
+                <small th:text="${isAdmin ? '관리자' : (isManager ? '팀장' : '사원')}">사원</small>
+            </div>
+            <form th:action="@{/logout}" method="post">
+                <button class="icon-button compact" type="submit" aria-label="로그아웃" title="로그아웃">↪</button>
+            </form>
+        </div>
+    </aside>
+
+    <section class="app-main">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="icon-button menu-button" type="button" data-sidebar-open aria-label="메뉴 열기">☰</button>
+                <div>
+                    <p class="eyebrow" th:text="${@viewDate.format(currentDate, 'yyyy년 M월 d일 EEEE')}">오늘</p>
+                    <h1 th:text="${pageTitle}">대시보드</h1>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <form class="global-search" th:action="@{/search}" method="get">
+                    <span>⌕</span>
+                    <input type="search" name="q" placeholder="통합 검색" minlength="2" aria-label="통합 검색">
+                    <kbd>Enter</kbd>
+                </form>
+                <button class="icon-button" type="button" data-theme-toggle aria-label="다크모드 전환" title="테마 전환">☾</button>
+                <div class="notification-wrap">
+                    <button class="icon-button" type="button" data-notification-toggle aria-label="알림 열기">
+                        ♢
+                        <span class="notification-badge" th:if="${unreadNotifications > 0}"
+                              th:text="${unreadNotifications > 99 ? '99+' : unreadNotifications}">3</span>
+                    </button>
+                    <div class="notification-panel" data-notification-panel>
+                        <div class="panel-heading">
+                            <div><strong>알림</strong><small th:text="${unreadNotifications + '개의 새 알림'}">새 알림</small></div>
+                            <button type="button" class="text-button" data-api-action="/api/v1/notifications/read-all"
+                                    data-method="POST">모두 읽음</button>
+                        </div>
+                        <div class="notification-list">
+                            <a th:each="item : ${notifications}" th:href="${item.linkUrl ?: '#'}"
+                               th:classappend="${item.readAt == null} ? ' unread'"
+                               th:attr="data-notification-id=${item.notificationId}">
+                                <span class="notification-dot"></span>
+                                <span><strong th:text="${item.title}">알림 제목</strong>
+                                    <small th:text="${item.message}">알림 내용</small>
+                                    <time th:text="${@viewDate.format(item.createdAt, 'M.d HH:mm')}">방금</time></span>
+                            </a>
+                            <div class="empty-mini" th:if="${#lists.isEmpty(notifications)}">새로운 알림이 없습니다.</div>
+                        </div>
+                    </div>
+                </div>
+                <a class="top-avatar" th:href="@{/my-page}"
+                   th:text="${#strings.substring(currentUser.employeeName(), 0, 1)}">이</a>
+            </div>
+        </header>
+
+        <div class="page-content" th:insert="${content}">
+            <p>Content</p>
+        </div>
+    </section>
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

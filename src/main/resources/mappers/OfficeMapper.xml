@@ -1,0 +1,1527 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.office_manager.mapper.OfficeMapper">
+
+    <!-- Authentication and bootstrap -->
+    <select id="findAccountByLoginId" resultType="map">
+        SELECT a.account_id AS accountId,
+               a.employee_id AS employeeId,
+               e.company_id AS companyId,
+               e.department_id AS departmentId,
+               e.employee_name AS employeeName,
+               a.login_id AS loginId,
+               a.password_hash AS passwordHash,
+               a.account_status AS accountStatus,
+               a.locked_until AS lockedUntil
+        FROM accounts a
+        JOIN employees e ON e.employee_id = a.employee_id
+        WHERE a.login_id = #{loginId}
+          AND a.deleted_at IS NULL
+          AND e.deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <select id="findAuthorities" resultType="string">
+        SELECT authority
+        FROM (
+            SELECT r.role_code AS authority
+            FROM account_roles ar
+            JOIN roles r ON r.role_id = ar.role_id
+            WHERE ar.account_id = #{accountId}
+              AND r.active = TRUE
+              AND (ar.expires_at IS NULL OR ar.expires_at > NOW(6))
+            UNION
+            SELECT p.permission_code AS authority
+            FROM account_roles ar
+            JOIN roles r ON r.role_id = ar.role_id AND r.active = TRUE
+            JOIN role_permissions rp ON rp.role_id = r.role_id
+            JOIN permissions p ON p.permission_id = rp.permission_id
+            WHERE ar.account_id = #{accountId}
+              AND (ar.expires_at IS NULL OR ar.expires_at > NOW(6))
+        ) authorities
+    </select>
+
+    <delete id="deleteRolePermission">
+        DELETE rp
+        FROM role_permissions rp
+        JOIN roles r ON r.role_id = rp.role_id
+        JOIN permissions p ON p.permission_id = rp.permission_id
+        WHERE r.role_code = #{roleCode}
+          AND p.permission_code = #{permissionCode}
+    </delete>
+
+    <select id="countAccounts" resultType="int">
+        SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL
+    </select>
+
+    <update id="recordLoginFailure">
+        UPDATE accounts
+        SET failed_login_count = failed_login_count + 1,
+            account_status = CASE WHEN failed_login_count + 1 >= 5 THEN 'LOCKED' ELSE account_status END,
+            locked_until = CASE WHEN failed_login_count + 1 >= 5
+                                THEN DATE_ADD(NOW(6), INTERVAL 30 MINUTE)
+                                ELSE locked_until END
+        WHERE login_id = #{loginId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="recordLoginSuccess">
+        UPDATE accounts
+        SET failed_login_count = 0,
+            account_status = 'ACTIVE',
+            locked_until = NULL,
+            last_login_at = NOW(6),
+            last_login_ip = #{ip}
+        WHERE account_id = #{accountId}
+    </update>
+
+    <insert id="insertLoginHistory">
+        INSERT INTO login_histories
+            (account_id, attempted_login_id, success, failure_reason,
+             ip_address, user_agent, logged_in_at)
+        VALUES
+            (#{accountId}, #{loginId}, #{success}, #{failureReason},
+             #{ip}, #{userAgent}, NOW(6))
+    </insert>
+
+    <select id="findCompanyIdByCode" resultType="long">
+        SELECT company_id FROM companies WHERE company_code = #{code} LIMIT 1
+    </select>
+
+    <select id="findDepartmentIdByCode" resultType="long">
+        SELECT department_id
+        FROM departments
+        WHERE company_id = #{companyId} AND department_code = #{code} AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <select id="findPositionIdByCode" resultType="long">
+        SELECT position_id
+        FROM positions
+        WHERE company_id = #{companyId} AND position_code = #{code} AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <select id="findRoleIdByCode" resultType="long">
+        SELECT role_id FROM roles WHERE role_code = #{code} AND active = TRUE LIMIT 1
+    </select>
+
+    <select id="findActiveLeavePolicyId" resultType="long">
+        SELECT leave_policy_id
+        FROM leave_policies
+        WHERE company_id = #{companyId}
+          AND active = TRUE
+          AND effective_from &lt;= #{date}
+          AND (effective_to IS NULL OR effective_to >= #{date})
+        ORDER BY effective_from DESC
+        LIMIT 1
+    </select>
+
+    <select id="findActiveWorkPolicyId" resultType="long">
+        SELECT work_policy_id
+        FROM work_policies
+        WHERE company_id = #{companyId}
+          AND active = TRUE
+          AND effective_from &lt;= #{date}
+          AND (effective_to IS NULL OR effective_to >= #{date})
+        ORDER BY effective_from DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertEmployee" parameterType="map" useGeneratedKeys="true" keyProperty="employeeId">
+        INSERT INTO employees
+            (company_id, department_id, position_id, employee_number, employee_name,
+             email, phone, hire_date, employment_status, employment_type, memo)
+        VALUES
+            (#{companyId}, #{departmentId}, #{positionId}, #{employeeNumber}, #{employeeName},
+             #{email}, #{phone}, #{hireDate}, #{employmentStatus}, #{employmentType}, #{memo})
+    </insert>
+
+    <insert id="insertAccount" parameterType="map" useGeneratedKeys="true" keyProperty="accountId">
+        INSERT INTO accounts
+            (employee_id, login_id, password_hash, account_status,
+             password_changed_at, must_change_password, created_by_account_id)
+        VALUES
+            (#{employeeId}, #{loginId}, #{passwordHash}, 'ACTIVE',
+             NOW(6), #{mustChangePassword}, #{createdByAccountId})
+    </insert>
+
+    <insert id="insertAccountRole">
+        INSERT IGNORE INTO account_roles (account_id, role_id, assigned_at)
+        VALUES (#{accountId}, #{roleId}, NOW(6))
+    </insert>
+
+    <insert id="insertInitialLeaveBalance">
+        INSERT IGNORE INTO leave_balances
+            (employee_id, leave_policy_id, balance_year, granted_days)
+        VALUES
+            (#{employeeId}, #{policyId}, #{year}, #{grantedDays})
+    </insert>
+
+    <insert id="insertWorkAssignment">
+        INSERT IGNORE INTO employee_work_policy_assignments
+            (employee_id, work_policy_id, effective_from)
+        VALUES
+            (#{employeeId}, #{policyId}, #{effectiveFrom})
+    </insert>
+
+    <update id="updateDepartmentLeader">
+        UPDATE departments
+        SET leader_employee_id = #{employeeId}
+        WHERE department_id = #{departmentId}
+    </update>
+
+    <!-- Dashboard and shared lookup data -->
+    <select id="dashboardStats" resultType="map">
+        SELECT
+            (SELECT COUNT(*)
+             FROM attendance_records ar
+             JOIN employees ae ON ae.employee_id = ar.employee_id
+             WHERE ae.company_id = #{companyId}
+               AND ar.work_date = CURRENT_DATE()
+               AND ar.clock_in_at IS NOT NULL) AS todayAttendance,
+            (SELECT COUNT(*)
+             FROM leave_requests lr
+             JOIN employees le ON le.employee_id = lr.employee_id
+             WHERE le.company_id = #{companyId}
+               AND lr.status = 'APPROVED'
+               AND CURRENT_DATE() BETWEEN lr.start_date AND lr.end_date) AS todayLeave,
+            (SELECT COUNT(*)
+             FROM approval_lines al
+             WHERE al.approver_employee_id = #{employeeId}
+               AND al.status = 'PENDING') AS pendingApprovals,
+            (SELECT COUNT(*)
+             FROM notifications n
+             JOIN accounts na ON na.account_id = n.recipient_account_id
+             WHERE na.employee_id = #{employeeId}
+               AND n.read_at IS NULL) AS unreadNotifications
+    </select>
+
+    <select id="dashboardNotices" resultType="map">
+        SELECT n.notice_id AS noticeId,
+               n.title,
+               n.pinned,
+               n.view_count AS viewCount,
+               n.published_at AS publishedAt,
+               e.employee_name AS authorName
+        FROM notices n
+        JOIN accounts a ON a.account_id = n.author_account_id
+        JOIN employees e ON e.employee_id = a.employee_id
+        WHERE n.company_id = #{companyId}
+          AND n.published = TRUE
+          AND n.deleted_at IS NULL
+        ORDER BY n.pinned DESC, n.published_at DESC
+        LIMIT 5
+    </select>
+
+    <select id="dashboardEvents" resultType="map">
+        SELECT ce.calendar_event_id AS eventId,
+               ce.event_type AS eventType,
+               ce.title,
+               ce.starts_at AS startsAt,
+               ce.ends_at AS endsAt,
+               ce.location,
+               ce.color
+        FROM calendar_events ce
+        WHERE ce.company_id = #{companyId}
+          AND ce.deleted_at IS NULL
+          AND ce.canceled_at IS NULL
+          AND ce.starts_at &lt; DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+          AND ce.ends_at >= CURRENT_DATE()
+          AND (ce.visibility IN ('COMPANY', 'DEPARTMENT')
+               OR ce.organizer_employee_id = #{employeeId}
+               OR EXISTS (SELECT 1 FROM calendar_event_participants cep
+                          WHERE cep.calendar_event_id = ce.calendar_event_id
+                            AND cep.employee_id = #{employeeId}))
+        ORDER BY ce.starts_at
+        LIMIT 5
+    </select>
+
+    <select id="dashboardApprovals" resultType="map">
+        SELECT ad.approval_document_id AS documentId,
+               ad.title,
+               ad.document_type AS documentType,
+               de.employee_name AS drafterName,
+               al.requested_at AS requestedAt
+        FROM approval_lines al
+        JOIN approval_documents ad ON ad.approval_document_id = al.approval_document_id
+        JOIN employees de ON de.employee_id = ad.drafter_employee_id
+        WHERE al.approver_employee_id = #{employeeId}
+          AND al.status = 'PENDING'
+          AND ad.deleted_at IS NULL
+        ORDER BY al.requested_at
+        LIMIT 5
+    </select>
+
+    <select id="listDepartments" resultType="map">
+        SELECT d.department_id AS departmentId,
+               d.department_code AS departmentCode,
+               d.department_name AS departmentName,
+               d.parent_department_id AS parentDepartmentId,
+               pd.department_name AS parentDepartmentName,
+               d.leader_employee_id AS leaderEmployeeId,
+               le.employee_name AS leaderName,
+               d.description,
+               d.sort_order AS sortOrder,
+               COUNT(e.employee_id) AS employeeCount
+        FROM departments d
+        LEFT JOIN departments pd ON pd.department_id = d.parent_department_id
+        LEFT JOIN employees le ON le.employee_id = d.leader_employee_id
+        LEFT JOIN employees e ON e.department_id = d.department_id
+                             AND e.deleted_at IS NULL
+                             AND e.employment_status != 'RESIGNED'
+        WHERE d.company_id = #{companyId}
+          AND d.deleted_at IS NULL
+        GROUP BY d.department_id, d.department_code, d.department_name,
+                 d.parent_department_id, pd.department_name, d.leader_employee_id,
+                 le.employee_name, d.description, d.sort_order
+        ORDER BY d.sort_order, d.department_name
+    </select>
+
+    <select id="listPositions" resultType="map">
+        SELECT p.position_id AS positionId,
+               p.position_code AS positionCode,
+               p.position_name AS positionName,
+               p.position_level AS positionLevel,
+               p.sort_order AS sortOrder,
+               COUNT(e.employee_id) AS employeeCount
+        FROM positions p
+        LEFT JOIN employees e ON e.position_id = p.position_id
+                             AND e.deleted_at IS NULL
+                             AND e.employment_status != 'RESIGNED'
+        WHERE p.company_id = #{companyId}
+          AND p.deleted_at IS NULL
+        GROUP BY p.position_id, p.position_code, p.position_name,
+                 p.position_level, p.sort_order
+        ORDER BY p.sort_order, p.position_level
+    </select>
+
+    <select id="listLeaveTypes" resultType="map">
+        SELECT leave_type_id AS leaveTypeId,
+               leave_type_code AS leaveTypeCode,
+               leave_type_name AS leaveTypeName,
+               deducts_annual_leave AS deductsAnnualLeave,
+               requires_attachment AS requiresAttachment
+        FROM leave_types
+        WHERE company_id = #{companyId} AND active = TRUE
+        ORDER BY sort_order
+    </select>
+
+    <select id="listEmployeeOptions" resultType="map">
+        SELECT e.employee_id AS employeeId,
+               e.employee_name AS employeeName,
+               e.employee_number AS employeeNumber,
+               d.department_name AS departmentName,
+               p.position_name AS positionName
+        FROM employees e
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        WHERE e.company_id = #{companyId}
+          AND e.deleted_at IS NULL
+          AND e.employment_status != 'RESIGNED'
+        ORDER BY d.sort_order, p.position_level DESC, e.employee_name
+    </select>
+
+    <select id="listAccountOptions" resultType="map">
+        SELECT a.account_id AS accountId,
+               e.employee_name AS employeeName,
+               e.employee_number AS employeeNumber,
+               d.department_name AS departmentName
+        FROM accounts a
+        JOIN employees e ON e.employee_id = a.employee_id
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        WHERE e.company_id = #{companyId}
+          AND a.account_id != #{excludeAccountId}
+          AND a.deleted_at IS NULL
+          AND e.deleted_at IS NULL
+        ORDER BY e.employee_name
+    </select>
+
+    <!-- Employees and organization -->
+    <select id="countEmployees" resultType="long">
+        SELECT COUNT(*)
+        FROM employees e
+        WHERE e.company_id = #{companyId}
+          AND e.deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (e.employee_name LIKE CONCAT('%', #{keyword}, '%')
+               OR e.employee_number LIKE CONCAT('%', #{keyword}, '%')
+               OR e.email LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="departmentId != null">
+          AND e.department_id = #{departmentId}
+        </if>
+        <if test="positionId != null">
+          AND e.position_id = #{positionId}
+        </if>
+    </select>
+
+    <select id="listEmployees" resultType="map">
+        SELECT e.employee_id AS employeeId,
+               e.employee_number AS employeeNumber,
+               e.employee_name AS employeeName,
+               e.email,
+               e.phone,
+               e.department_id AS departmentId,
+               d.department_name AS departmentName,
+               e.position_id AS positionId,
+               p.position_name AS positionName,
+               e.hire_date AS hireDate,
+               e.termination_date AS terminationDate,
+               e.employment_status AS employmentStatus,
+               e.employment_type AS employmentType,
+               e.profile_file_id AS profileFileId,
+               a.login_id AS loginId,
+               GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.role_id SEPARATOR ', ') AS roleNames
+        FROM employees e
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        LEFT JOIN accounts a ON a.employee_id = e.employee_id AND a.deleted_at IS NULL
+        LEFT JOIN account_roles ar ON ar.account_id = a.account_id
+        LEFT JOIN roles r ON r.role_id = ar.role_id
+        WHERE e.company_id = #{companyId}
+          AND e.deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (e.employee_name LIKE CONCAT('%', #{keyword}, '%')
+               OR e.employee_number LIKE CONCAT('%', #{keyword}, '%')
+               OR e.email LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="departmentId != null">
+          AND e.department_id = #{departmentId}
+        </if>
+        <if test="positionId != null">
+          AND e.position_id = #{positionId}
+        </if>
+        GROUP BY e.employee_id, e.employee_number, e.employee_name, e.email, e.phone,
+                 e.department_id, d.department_name, e.position_id, p.position_name,
+                 e.hire_date, e.termination_date, e.employment_status, e.employment_type,
+                 e.profile_file_id, a.login_id
+        ORDER BY e.employee_number
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="findEmployee" resultType="map">
+        SELECT e.employee_id AS employeeId,
+               e.employee_number AS employeeNumber,
+               e.employee_name AS employeeName,
+               e.email,
+               e.phone,
+               e.department_id AS departmentId,
+               d.department_name AS departmentName,
+               e.position_id AS positionId,
+               p.position_name AS positionName,
+               e.hire_date AS hireDate,
+               e.termination_date AS terminationDate,
+               e.employment_status AS employmentStatus,
+               e.employment_type AS employmentType,
+               e.profile_file_id AS profileFileId,
+               e.memo,
+               a.login_id AS loginId,
+               a.account_status AS accountStatus
+        FROM employees e
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        LEFT JOIN accounts a ON a.employee_id = e.employee_id AND a.deleted_at IS NULL
+        WHERE e.company_id = #{companyId}
+          AND e.employee_id = #{employeeId}
+          AND e.deleted_at IS NULL
+    </select>
+
+    <update id="updateEmployee" parameterType="map">
+        UPDATE employees
+        SET department_id = #{departmentId},
+            position_id = #{positionId},
+            employee_number = #{employeeNumber},
+            employee_name = #{employeeName},
+            email = #{email},
+            phone = #{phone},
+            hire_date = #{hireDate},
+            employment_status = #{employmentStatus},
+            employment_type = #{employmentType},
+            memo = #{memo},
+            termination_date = CASE WHEN #{employmentStatus} = 'RESIGNED'
+                                    THEN COALESCE(termination_date, CURRENT_DATE())
+                                    ELSE NULL END,
+            version = version + 1
+        WHERE company_id = #{companyId}
+          AND employee_id = #{employeeId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="softDeleteEmployee">
+        UPDATE employees
+        SET deleted_at = NOW(6), version = version + 1
+        WHERE company_id = #{companyId}
+          AND employee_id = #{employeeId}
+          AND deleted_at IS NULL
+    </update>
+
+    <insert id="insertDepartment" parameterType="map" useGeneratedKeys="true" keyProperty="departmentId">
+        INSERT INTO departments
+            (company_id, parent_department_id, leader_employee_id, department_code,
+             department_name, description, sort_order)
+        VALUES
+            (#{companyId}, #{parentDepartmentId}, #{leaderEmployeeId}, #{departmentCode},
+             #{departmentName}, #{description}, #{sortOrder})
+    </insert>
+
+    <update id="updateDepartment" parameterType="map">
+        UPDATE departments
+        SET parent_department_id = #{parentDepartmentId},
+            leader_employee_id = #{leaderEmployeeId},
+            department_code = #{departmentCode},
+            department_name = #{departmentName},
+            description = #{description},
+            sort_order = #{sortOrder}
+        WHERE company_id = #{companyId}
+          AND department_id = #{departmentId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="softDeleteDepartment">
+        UPDATE departments
+        SET deleted_at = NOW(6), active = FALSE
+        WHERE company_id = #{companyId}
+          AND department_id = #{departmentId}
+          AND deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM employees e
+                          WHERE e.department_id = departments.department_id
+                            AND e.deleted_at IS NULL)
+    </update>
+
+    <insert id="insertPosition" parameterType="map" useGeneratedKeys="true" keyProperty="positionId">
+        INSERT INTO positions
+            (company_id, position_code, position_name, position_level, sort_order)
+        VALUES
+            (#{companyId}, #{positionCode}, #{positionName}, #{positionLevel}, #{sortOrder})
+    </insert>
+
+    <update id="updatePosition" parameterType="map">
+        UPDATE positions
+        SET position_code = #{positionCode},
+            position_name = #{positionName},
+            position_level = #{positionLevel},
+            sort_order = #{sortOrder}
+        WHERE company_id = #{companyId}
+          AND position_id = #{positionId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="softDeletePosition">
+        UPDATE positions
+        SET deleted_at = NOW(6), active = FALSE
+        WHERE company_id = #{companyId}
+          AND position_id = #{positionId}
+          AND deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM employees e
+                          WHERE e.position_id = positions.position_id
+                            AND e.deleted_at IS NULL)
+    </update>
+
+    <!-- Annual leave and electronic approval -->
+    <select id="findLeaveBalance" resultType="map">
+        SELECT lb.leave_balance_id AS leaveBalanceId,
+               lb.balance_year AS balanceYear,
+               lb.granted_days AS grantedDays,
+               lb.carried_over_days AS carriedOverDays,
+               lb.adjustment_days AS adjustmentDays,
+               lb.used_days AS usedDays,
+               lb.pending_days AS pendingDays,
+               lb.expired_days AS expiredDays,
+               lb.remaining_days AS remainingDays,
+               lb.available_days AS availableDays
+        FROM leave_balances lb
+        WHERE lb.employee_id = #{employeeId}
+          AND lb.balance_year = #{year}
+    </select>
+
+    <select id="lockLeaveBalance" resultType="map">
+        SELECT lb.leave_balance_id AS leaveBalanceId,
+               lb.available_days AS availableDays,
+               lb.remaining_days AS remainingDays,
+               lb.pending_days AS pendingDays
+        FROM leave_balances lb
+        WHERE lb.employee_id = #{employeeId}
+          AND lb.balance_year = #{year}
+        FOR UPDATE
+    </select>
+
+    <select id="countLeaveRequests" resultType="long">
+        SELECT COUNT(*)
+        FROM leave_requests lr
+        JOIN employees e ON e.employee_id = lr.employee_id
+        WHERE e.company_id = #{companyId}
+          AND (
+            #{admin} = TRUE
+            OR (#{manager} = TRUE AND e.department_id = #{departmentId})
+            OR lr.employee_id = #{employeeId}
+          )
+        <if test="status != null and status != ''">
+          AND lr.status = #{status}
+        </if>
+    </select>
+
+    <select id="listLeaveRequests" resultType="map">
+        SELECT lr.leave_request_id AS leaveRequestId,
+               lr.employee_id AS employeeId,
+               e.employee_name AS employeeName,
+               e.employee_number AS employeeNumber,
+               d.department_name AS departmentName,
+               lt.leave_type_name AS leaveTypeName,
+               lr.leave_unit AS leaveUnit,
+               lr.start_date AS startDate,
+               lr.end_date AS endDate,
+               lr.requested_days AS requestedDays,
+               lr.reason,
+               lr.status,
+               lr.rejection_reason AS rejectionReason,
+               lr.approval_document_id AS approvalDocumentId,
+               lr.submitted_at AS submittedAt
+        FROM leave_requests lr
+        JOIN employees e ON e.employee_id = lr.employee_id
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        JOIN leave_types lt ON lt.leave_type_id = lr.leave_type_id
+        WHERE e.company_id = #{companyId}
+          AND (
+            #{admin} = TRUE
+            OR (#{manager} = TRUE AND e.department_id = #{departmentId})
+            OR lr.employee_id = #{employeeId}
+          )
+        <if test="status != null and status != ''">
+          AND lr.status = #{status}
+        </if>
+        ORDER BY lr.created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="findDepartmentLeaderEmployeeId" resultType="long">
+        SELECT leader_employee_id
+        FROM departments
+        WHERE department_id = #{departmentId}
+          AND deleted_at IS NULL
+    </select>
+
+    <select id="findAdminEmployeeId" resultType="long">
+        SELECT e.employee_id
+        FROM accounts a
+        JOIN employees e ON e.employee_id = a.employee_id
+        JOIN account_roles ar ON ar.account_id = a.account_id
+        JOIN roles r ON r.role_id = ar.role_id
+        WHERE e.company_id = #{companyId}
+          AND r.role_code = 'ROLE_ADMIN'
+          AND e.employee_id != #{excludeEmployeeId}
+          AND a.account_status = 'ACTIVE'
+          AND a.deleted_at IS NULL
+          AND e.deleted_at IS NULL
+        ORDER BY e.employee_id
+        LIMIT 1
+    </select>
+
+    <select id="findAccountIdByEmployeeId" resultType="long">
+        SELECT account_id
+        FROM accounts
+        WHERE employee_id = #{employeeId}
+          AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
+    <insert id="insertApprovalDocument" parameterType="map" useGeneratedKeys="true" keyProperty="documentId">
+        INSERT INTO approval_documents
+            (company_id, drafter_employee_id, document_number, title, content,
+             document_type, business_type, status, current_step_order, submitted_at)
+        VALUES
+            (#{companyId}, #{drafterEmployeeId}, #{documentNumber}, #{title}, #{content},
+             #{documentType}, #{businessType}, 'PENDING', 1, NOW(6))
+    </insert>
+
+    <update id="updateApprovalBusinessId">
+        UPDATE approval_documents
+        SET business_id = #{businessId}
+        WHERE approval_document_id = #{documentId}
+    </update>
+
+    <insert id="insertApprovalLine" parameterType="map" useGeneratedKeys="true" keyProperty="lineId">
+        INSERT INTO approval_lines
+            (approval_document_id, step_order, line_type, approver_employee_id,
+             required, status, requested_at)
+        VALUES
+            (#{documentId}, #{stepOrder}, 'APPROVAL', #{approverEmployeeId},
+             TRUE, #{status}, CASE WHEN #{status} = 'PENDING' THEN NOW(6) ELSE NULL END)
+    </insert>
+
+    <insert id="insertLeaveRequest" parameterType="map" useGeneratedKeys="true" keyProperty="leaveRequestId">
+        INSERT INTO leave_requests
+            (employee_id, leave_type_id, leave_balance_id, approval_document_id,
+             leave_unit, start_date, end_date, requested_days, reason,
+             status, submitted_at)
+        VALUES
+            (#{employeeId}, #{leaveTypeId}, #{leaveBalanceId}, #{documentId},
+             #{leaveUnit}, #{startDate}, #{endDate}, #{requestedDays}, #{reason},
+             'PENDING', NOW(6))
+    </insert>
+
+    <update id="addPendingLeave">
+        UPDATE leave_balances
+        SET pending_days = pending_days + #{days}, version = version + 1
+        WHERE leave_balance_id = #{leaveBalanceId}
+    </update>
+
+    <insert id="insertNotification" parameterType="map">
+        INSERT INTO notifications
+            (recipient_account_id, actor_account_id, notification_type,
+             title, message, link_url, reference_type, reference_id)
+        VALUES
+            (#{recipientAccountId}, #{actorAccountId}, #{notificationType},
+             #{title}, #{message}, #{linkUrl}, #{referenceType}, #{referenceId})
+    </insert>
+
+    <select id="listApprovalTasks" resultType="map">
+        SELECT al.approval_line_id AS approvalLineId,
+               ad.approval_document_id AS documentId,
+               ad.document_number AS documentNumber,
+               ad.title,
+               ad.document_type AS documentType,
+               ad.business_type AS businessType,
+               de.employee_name AS drafterName,
+               dd.department_name AS drafterDepartment,
+               al.step_order AS stepOrder,
+               al.requested_at AS requestedAt
+        FROM approval_lines al
+        JOIN approval_documents ad ON ad.approval_document_id = al.approval_document_id
+        JOIN employees de ON de.employee_id = ad.drafter_employee_id
+        LEFT JOIN departments dd ON dd.department_id = de.department_id
+        WHERE al.approver_employee_id = #{employeeId}
+          AND al.status = 'PENDING'
+          AND ad.status = 'PENDING'
+          AND ad.deleted_at IS NULL
+        ORDER BY al.requested_at
+    </select>
+
+    <select id="listApprovalDocuments" resultType="map">
+        SELECT DISTINCT ad.approval_document_id AS documentId,
+               ad.document_number AS documentNumber,
+               ad.title,
+               ad.document_type AS documentType,
+               ad.business_type AS businessType,
+               ad.status,
+               ad.submitted_at AS submittedAt,
+               ad.completed_at AS completedAt,
+               ad.created_at AS createdAt,
+               de.employee_name AS drafterName,
+               d.department_name AS departmentName
+        FROM approval_documents ad
+        JOIN employees de ON de.employee_id = ad.drafter_employee_id
+        LEFT JOIN departments d ON d.department_id = de.department_id
+        LEFT JOIN approval_lines al ON al.approval_document_id = ad.approval_document_id
+        WHERE ad.company_id = #{companyId}
+          AND ad.deleted_at IS NULL
+          AND (#{admin} = TRUE
+               OR ad.drafter_employee_id = #{employeeId}
+               OR al.approver_employee_id = #{employeeId})
+        ORDER BY createdAt DESC
+        LIMIT 100
+    </select>
+
+    <select id="findApprovalDocument" resultType="map">
+        SELECT DISTINCT ad.approval_document_id AS documentId,
+               ad.document_number AS documentNumber,
+               ad.title,
+               ad.content,
+               ad.document_type AS documentType,
+               ad.business_type AS businessType,
+               ad.business_id AS businessId,
+               ad.status,
+               ad.current_step_order AS currentStepOrder,
+               ad.submitted_at AS submittedAt,
+               ad.completed_at AS completedAt,
+               de.employee_name AS drafterName,
+               d.department_name AS departmentName,
+               p.position_name AS positionName
+        FROM approval_documents ad
+        JOIN employees de ON de.employee_id = ad.drafter_employee_id
+        LEFT JOIN departments d ON d.department_id = de.department_id
+        LEFT JOIN positions p ON p.position_id = de.position_id
+        LEFT JOIN approval_lines al ON al.approval_document_id = ad.approval_document_id
+        WHERE ad.company_id = #{companyId}
+          AND ad.approval_document_id = #{documentId}
+          AND ad.deleted_at IS NULL
+          AND (#{admin} = TRUE
+               OR ad.drafter_employee_id = #{employeeId}
+               OR al.approver_employee_id = #{employeeId})
+        LIMIT 1
+    </select>
+
+    <select id="findApprovalLines" resultType="map">
+        SELECT al.approval_line_id AS approvalLineId,
+               al.step_order AS stepOrder,
+               al.approver_employee_id AS approverEmployeeId,
+               al.status,
+               al.opinion,
+               al.rejection_reason AS rejectionReason,
+               al.requested_at AS requestedAt,
+               al.acted_at AS actedAt,
+               e.employee_name AS approverName,
+               p.position_name AS approverPosition,
+               d.department_name AS approverDepartment
+        FROM approval_lines al
+        JOIN employees e ON e.employee_id = al.approver_employee_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        WHERE al.approval_document_id = #{documentId}
+        ORDER BY al.step_order
+    </select>
+
+    <select id="findApprovalAttachments" resultType="map">
+        SELECT fa.file_id AS fileId,
+               fa.original_name AS originalName,
+               fa.content_type AS contentType,
+               fa.size_bytes AS sizeBytes
+        FROM approval_document_attachments ada
+        JOIN file_assets fa ON fa.file_id = ada.file_id
+        WHERE ada.approval_document_id = #{documentId}
+          AND fa.deleted_at IS NULL
+        ORDER BY ada.sort_order, fa.created_at
+    </select>
+
+    <insert id="linkApprovalFile">
+        INSERT IGNORE INTO approval_document_attachments (approval_document_id, file_id)
+        VALUES (#{documentId}, #{fileId})
+    </insert>
+
+    <select id="lockPendingApprovalLine" resultType="map">
+        SELECT al.approval_line_id AS lineId,
+               al.step_order AS stepOrder,
+               al.status AS lineStatus,
+               ad.status AS documentStatus,
+               ad.business_type AS businessType,
+               ad.business_id AS businessId,
+               ad.drafter_employee_id AS drafterEmployeeId,
+               ad.title
+        FROM approval_lines al
+        JOIN approval_documents ad ON ad.approval_document_id = al.approval_document_id
+        WHERE al.approval_document_id = #{documentId}
+          AND al.approver_employee_id = #{approverEmployeeId}
+          AND al.status = 'PENDING'
+          AND ad.status = 'PENDING'
+        FOR UPDATE
+    </select>
+
+    <update id="approveLine">
+        UPDATE approval_lines
+        SET status = 'APPROVED', opinion = #{opinion}, acted_at = NOW(6)
+        WHERE approval_line_id = #{lineId} AND status = 'PENDING'
+    </update>
+
+    <update id="rejectLine">
+        UPDATE approval_lines
+        SET status = 'REJECTED', rejection_reason = #{reason}, acted_at = NOW(6)
+        WHERE approval_line_id = #{lineId} AND status = 'PENDING'
+    </update>
+
+    <select id="findNextApprovalLine" resultType="map">
+        SELECT approval_line_id AS lineId,
+               step_order AS stepOrder,
+               approver_employee_id AS approverEmployeeId
+        FROM approval_lines
+        WHERE approval_document_id = #{documentId}
+          AND step_order > #{stepOrder}
+          AND status = 'WAITING'
+        ORDER BY step_order
+        LIMIT 1
+    </select>
+
+    <update id="activateApprovalLine">
+        UPDATE approval_lines
+        SET status = 'PENDING', requested_at = NOW(6)
+        WHERE approval_line_id = #{lineId} AND status = 'WAITING'
+    </update>
+
+    <update id="moveApprovalDocumentStep">
+        UPDATE approval_documents
+        SET current_step_order = #{stepOrder}, version = version + 1
+        WHERE approval_document_id = #{documentId} AND status = 'PENDING'
+    </update>
+
+    <update id="completeApprovalDocument">
+        UPDATE approval_documents
+        SET status = #{status}, completed_at = NOW(6), version = version + 1
+        WHERE approval_document_id = #{documentId} AND status = 'PENDING'
+    </update>
+
+    <select id="lockLeaveByApprovalDocument" resultType="map">
+        SELECT lr.leave_request_id AS leaveRequestId,
+               lr.leave_balance_id AS leaveBalanceId,
+               lr.employee_id AS employeeId,
+               lr.start_date AS startDate,
+               lr.end_date AS endDate,
+               lr.requested_days AS requestedDays,
+               lr.status,
+               lt.leave_type_name AS leaveTypeName
+        FROM leave_requests lr
+        JOIN leave_types lt ON lt.leave_type_id = lr.leave_type_id
+        WHERE lr.approval_document_id = #{documentId}
+        FOR UPDATE
+    </select>
+
+    <update id="approveLeaveRequest">
+        UPDATE leave_requests
+        SET status = 'APPROVED', approved_at = NOW(6), version = version + 1
+        WHERE leave_request_id = #{leaveRequestId} AND status = 'PENDING'
+    </update>
+
+    <update id="rejectLeaveRequest">
+        UPDATE leave_requests
+        SET status = 'REJECTED', rejection_reason = #{reason}, version = version + 1
+        WHERE leave_request_id = #{leaveRequestId} AND status = 'PENDING'
+    </update>
+
+    <update id="consumeLeaveBalance">
+        UPDATE leave_balances
+        SET pending_days = GREATEST(0, pending_days - #{days}),
+            used_days = used_days + #{days},
+            version = version + 1
+        WHERE leave_balance_id = #{leaveBalanceId}
+    </update>
+
+    <update id="releasePendingLeave">
+        UPDATE leave_balances
+        SET pending_days = GREATEST(0, pending_days - #{days}),
+            version = version + 1
+        WHERE leave_balance_id = #{leaveBalanceId}
+    </update>
+
+    <insert id="insertLeaveTransaction" parameterType="map">
+        INSERT INTO leave_transactions
+            (leave_balance_id, leave_request_id, transaction_type, idempotency_key,
+             days, effective_date, description, created_by_account_id)
+        VALUES
+            (#{leaveBalanceId}, #{leaveRequestId}, #{transactionType}, #{idempotencyKey},
+             #{days}, #{effectiveDate}, #{description}, #{createdByAccountId})
+    </insert>
+
+    <insert id="insertCalendarEvent" parameterType="map" useGeneratedKeys="true" keyProperty="eventId">
+        INSERT INTO calendar_events
+            (company_id, organizer_employee_id, event_type, title, description,
+             location, starts_at, ends_at, all_day, visibility, source_type,
+             source_id, color)
+        VALUES
+            (#{companyId}, #{organizerEmployeeId}, #{eventType}, #{title}, #{description},
+             #{location}, #{startsAt}, #{endsAt}, #{allDay}, #{visibility}, #{sourceType},
+             #{sourceId}, #{color})
+    </insert>
+
+    <insert id="insertApprovalHistory" parameterType="map">
+        INSERT INTO approval_histories
+            (approval_document_id, approval_line_id, actor_employee_id,
+             action_type, from_status, to_status, comment_text)
+        VALUES
+            (#{documentId}, #{lineId}, #{actorEmployeeId},
+             #{actionType}, #{fromStatus}, #{toStatus}, #{comment})
+    </insert>
+
+    <!-- Attendance -->
+    <select id="findTodayAttendance" resultType="map">
+        SELECT attendance_record_id AS attendanceRecordId,
+               work_date AS workDate,
+               scheduled_start_at AS scheduledStartAt,
+               scheduled_end_at AS scheduledEndAt,
+               clock_in_at AS clockInAt,
+               clock_out_at AS clockOutAt,
+               work_minutes AS workMinutes,
+               overtime_minutes AS overtimeMinutes,
+               late_minutes AS lateMinutes,
+               early_leave_minutes AS earlyLeaveMinutes,
+               status
+        FROM attendance_records
+        WHERE employee_id = #{employeeId}
+          AND work_date = #{workDate}
+    </select>
+
+    <select id="findEmployeeWorkPolicy" resultType="map">
+        SELECT wp.work_policy_id AS workPolicyId,
+               wp.work_start_time AS workStartTime,
+               wp.work_end_time AS workEndTime,
+               wp.break_minutes AS breakMinutes,
+               wp.late_grace_minutes AS lateGraceMinutes,
+               wp.early_leave_grace_minutes AS earlyLeaveGraceMinutes,
+               wp.standard_work_minutes AS standardWorkMinutes
+        FROM employee_work_policy_assignments ewa
+        JOIN work_policies wp ON wp.work_policy_id = ewa.work_policy_id
+        WHERE ewa.employee_id = #{employeeId}
+          AND ewa.effective_from &lt;= #{workDate}
+          AND (ewa.effective_to IS NULL OR ewa.effective_to >= #{workDate})
+        ORDER BY ewa.effective_from DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertClockIn" parameterType="map" useGeneratedKeys="true" keyProperty="attendanceRecordId">
+        INSERT INTO attendance_records
+            (employee_id, work_policy_id, work_date, scheduled_start_at,
+             scheduled_end_at, clock_in_at, late_minutes, status)
+        VALUES
+            (#{employeeId}, #{workPolicyId}, #{workDate}, #{scheduledStartAt},
+             #{scheduledEndAt}, #{clockInAt}, #{lateMinutes}, #{status})
+    </insert>
+
+    <update id="updateClockOut" parameterType="map">
+        UPDATE attendance_records
+        SET clock_out_at = #{clockOutAt},
+            break_minutes = #{breakMinutes},
+            work_minutes = #{workMinutes},
+            overtime_minutes = #{overtimeMinutes},
+            early_leave_minutes = #{earlyLeaveMinutes},
+            status = #{status},
+            version = version + 1
+        WHERE attendance_record_id = #{attendanceRecordId}
+          AND employee_id = #{employeeId}
+          AND clock_out_at IS NULL
+    </update>
+
+    <select id="countAttendanceHistory" resultType="long">
+        SELECT COUNT(*) FROM attendance_records WHERE employee_id = #{employeeId}
+    </select>
+
+    <select id="listAttendanceHistory" resultType="map">
+        SELECT attendance_record_id AS attendanceRecordId,
+               work_date AS workDate,
+               clock_in_at AS clockInAt,
+               clock_out_at AS clockOutAt,
+               work_minutes AS workMinutes,
+               overtime_minutes AS overtimeMinutes,
+               late_minutes AS lateMinutes,
+               early_leave_minutes AS earlyLeaveMinutes,
+               status
+        FROM attendance_records
+        WHERE employee_id = #{employeeId}
+        ORDER BY work_date DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- Notices and resource library -->
+    <select id="countNotices" resultType="long">
+        SELECT COUNT(*)
+        FROM notices
+        WHERE company_id = #{companyId}
+          AND published = TRUE
+          AND deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (title LIKE CONCAT('%', #{keyword}, '%')
+               OR content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </select>
+
+    <select id="listNotices" resultType="map">
+        SELECT n.notice_id AS noticeId,
+               n.title,
+               n.pinned,
+               n.published,
+               n.view_count AS viewCount,
+               n.published_at AS publishedAt,
+               n.created_at AS createdAt,
+               nc.category_name AS categoryName,
+               e.employee_name AS authorName,
+               COUNT(na.file_id) AS attachmentCount
+        FROM notices n
+        LEFT JOIN notice_categories nc ON nc.notice_category_id = n.notice_category_id
+        JOIN accounts a ON a.account_id = n.author_account_id
+        JOIN employees e ON e.employee_id = a.employee_id
+        LEFT JOIN notice_attachments na ON na.notice_id = n.notice_id
+        WHERE n.company_id = #{companyId}
+          AND n.published = TRUE
+          AND n.deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (n.title LIKE CONCAT('%', #{keyword}, '%')
+               OR n.content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        GROUP BY n.notice_id, n.title, n.pinned, n.published, n.view_count,
+                 n.published_at, n.created_at, nc.category_name, e.employee_name
+        ORDER BY n.pinned DESC, n.published_at DESC, n.created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="findNotice" resultType="map">
+        SELECT n.notice_id AS noticeId,
+               n.notice_category_id AS categoryId,
+               nc.category_name AS categoryName,
+               n.author_account_id AS authorAccountId,
+               n.title,
+               n.content,
+               n.pinned,
+               n.published,
+               n.view_count AS viewCount,
+               n.published_at AS publishedAt,
+               e.employee_name AS authorName
+        FROM notices n
+        LEFT JOIN notice_categories nc ON nc.notice_category_id = n.notice_category_id
+        JOIN accounts a ON a.account_id = n.author_account_id
+        JOIN employees e ON e.employee_id = a.employee_id
+        WHERE n.company_id = #{companyId}
+          AND n.notice_id = #{noticeId}
+          AND n.deleted_at IS NULL
+    </select>
+
+    <select id="findNoticeAttachments" resultType="map">
+        SELECT fa.file_id AS fileId,
+               fa.original_name AS originalName,
+               fa.content_type AS contentType,
+               fa.size_bytes AS sizeBytes
+        FROM notice_attachments na
+        JOIN file_assets fa ON fa.file_id = na.file_id
+        WHERE na.notice_id = #{noticeId} AND fa.deleted_at IS NULL
+        ORDER BY na.sort_order, fa.created_at
+    </select>
+
+    <update id="incrementNoticeView">
+        UPDATE notices
+        SET view_count = view_count + 1
+        WHERE notice_id = #{noticeId} AND deleted_at IS NULL
+    </update>
+
+    <insert id="insertNotice" parameterType="map" useGeneratedKeys="true" keyProperty="noticeId">
+        INSERT INTO notices
+            (company_id, notice_category_id, author_account_id, title, content,
+             pinned, published, published_at)
+        VALUES
+            (#{companyId}, #{categoryId}, #{authorAccountId}, #{title}, #{content},
+             #{pinned}, #{published}, CASE WHEN #{published} THEN NOW(6) ELSE NULL END)
+    </insert>
+
+    <update id="updateNotice" parameterType="map">
+        UPDATE notices
+        SET notice_category_id = #{categoryId},
+            title = #{title},
+            content = #{content},
+            pinned = #{pinned},
+            published = #{published},
+            published_at = CASE WHEN #{published} THEN COALESCE(published_at, NOW(6)) ELSE NULL END,
+            version = version + 1
+        WHERE company_id = #{companyId}
+          AND notice_id = #{noticeId}
+          AND deleted_at IS NULL
+    </update>
+
+    <insert id="linkNoticeFile">
+        INSERT IGNORE INTO notice_attachments (notice_id, file_id)
+        VALUES (#{noticeId}, #{fileId})
+    </insert>
+
+    <update id="softDeleteNotice">
+        UPDATE notices
+        SET deleted_at = NOW(6), deleted_by_account_id = #{accountId}, version = version + 1
+        WHERE company_id = #{companyId}
+          AND notice_id = #{noticeId}
+          AND deleted_at IS NULL
+    </update>
+
+    <select id="listNoticeCategories" resultType="map">
+        SELECT notice_category_id AS categoryId, category_name AS categoryName
+        FROM notice_categories
+        WHERE company_id = #{companyId} AND active = TRUE
+        ORDER BY sort_order
+    </select>
+
+    <select id="countResources" resultType="long">
+        SELECT COUNT(*)
+        FROM resources
+        WHERE company_id = #{companyId}
+          AND published = TRUE
+          AND deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (title LIKE CONCAT('%', #{keyword}, '%')
+               OR description LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </select>
+
+    <select id="listResources" resultType="map">
+        SELECT r.resource_id AS resourceId,
+               r.title,
+               r.description,
+               r.download_count AS downloadCount,
+               r.created_at AS createdAt,
+               e.employee_name AS authorName,
+               fa.file_id AS fileId,
+               fa.original_name AS originalName,
+               fa.content_type AS contentType,
+               fa.size_bytes AS sizeBytes,
+               fa.extension
+        FROM resources r
+        JOIN accounts a ON a.account_id = r.author_account_id
+        JOIN employees e ON e.employee_id = a.employee_id
+        LEFT JOIN resource_files rf ON rf.resource_id = r.resource_id
+        LEFT JOIN file_assets fa ON fa.file_id = rf.file_id AND fa.deleted_at IS NULL
+        WHERE r.company_id = #{companyId}
+          AND r.published = TRUE
+          AND r.deleted_at IS NULL
+        <if test="keyword != null and keyword != ''">
+          AND (r.title LIKE CONCAT('%', #{keyword}, '%')
+               OR r.description LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY r.created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="insertResource" parameterType="map" useGeneratedKeys="true" keyProperty="resourceId">
+        INSERT INTO resources
+            (company_id, author_account_id, title, description, published)
+        VALUES
+            (#{companyId}, #{authorAccountId}, #{title}, #{description}, TRUE)
+    </insert>
+
+    <insert id="linkResourceFile">
+        INSERT INTO resource_files (resource_id, file_id)
+        VALUES (#{resourceId}, #{fileId})
+    </insert>
+
+    <insert id="insertFileAsset" parameterType="map" useGeneratedKeys="true" keyProperty="fileId">
+        INSERT INTO file_assets
+            (company_id, uploader_account_id, original_name, stored_name,
+             storage_provider, storage_key, content_type, extension, size_bytes,
+             checksum_sha256, image_width, image_height, scan_status)
+        VALUES
+            (#{companyId}, #{uploaderAccountId}, #{originalName}, #{storedName},
+             'LOCAL', #{storageKey}, #{contentType}, #{extension}, #{sizeBytes},
+             #{checksumSha256}, #{imageWidth}, #{imageHeight}, 'SAFE')
+    </insert>
+
+    <select id="findFileAsset" resultType="map">
+        SELECT file_id AS fileId,
+               company_id AS companyId,
+               original_name AS originalName,
+               storage_key AS storageKey,
+               content_type AS contentType,
+               size_bytes AS sizeBytes
+        FROM file_assets
+        WHERE file_id = #{fileId} AND deleted_at IS NULL
+    </select>
+
+    <insert id="recordFileDownload">
+        INSERT INTO file_access_logs (file_id, account_id, action_type, ip_address)
+        VALUES (#{fileId}, #{accountId}, 'DOWNLOAD', #{ip})
+    </insert>
+
+    <update id="incrementResourceDownload">
+        UPDATE resources r
+        JOIN resource_files rf ON rf.resource_id = r.resource_id
+        SET r.download_count = r.download_count + 1
+        WHERE rf.file_id = #{fileId}
+    </update>
+
+    <!-- Calendar -->
+    <select id="listCalendarEvents" resultType="map">
+        SELECT ce.calendar_event_id AS eventId,
+               ce.event_type AS eventType,
+               ce.title,
+               ce.description,
+               ce.location,
+               ce.starts_at AS startsAt,
+               ce.ends_at AS endsAt,
+               ce.all_day AS allDay,
+               ce.visibility,
+               ce.color,
+               ce.organizer_employee_id AS organizerEmployeeId,
+               oe.employee_name AS organizerName
+        FROM calendar_events ce
+        JOIN employees oe ON oe.employee_id = ce.organizer_employee_id
+        WHERE ce.company_id = #{companyId}
+          AND ce.deleted_at IS NULL
+          AND ce.canceled_at IS NULL
+          AND ce.starts_at &lt; #{to}
+          AND ce.ends_at >= #{from}
+          AND (ce.visibility = 'COMPANY'
+               OR ce.organizer_employee_id = #{employeeId}
+               OR (ce.visibility = 'DEPARTMENT'
+                   AND oe.department_id = (SELECT department_id FROM employees WHERE employee_id = #{employeeId}))
+               OR EXISTS (SELECT 1 FROM calendar_event_participants cep
+                          WHERE cep.calendar_event_id = ce.calendar_event_id
+                            AND cep.employee_id = #{employeeId}))
+        ORDER BY ce.starts_at
+    </select>
+
+    <update id="deleteCalendarEvent">
+        UPDATE calendar_events
+        SET deleted_at = NOW(6), version = version + 1
+        WHERE company_id = #{companyId}
+          AND calendar_event_id = #{eventId}
+          AND deleted_at IS NULL
+          AND (#{admin} = TRUE OR organizer_employee_id = #{employeeId})
+    </update>
+
+    <!-- Internal messages and notifications -->
+    <select id="listInbox" resultType="map">
+        SELECT m.message_id AS messageId,
+               m.subject,
+               m.body,
+               m.read_at AS readAt,
+               m.created_at AS createdAt,
+               se.employee_name AS senderName,
+               sa.account_id AS senderAccountId
+        FROM internal_messages m
+        JOIN accounts sa ON sa.account_id = m.sender_account_id
+        JOIN employees se ON se.employee_id = sa.employee_id
+        WHERE m.recipient_account_id = #{accountId}
+          AND m.recipient_deleted_at IS NULL
+        ORDER BY m.created_at DESC
+        LIMIT 100
+    </select>
+
+    <select id="listSentMessages" resultType="map">
+        SELECT m.message_id AS messageId,
+               m.subject,
+               m.body,
+               m.read_at AS readAt,
+               m.created_at AS createdAt,
+               re.employee_name AS recipientName
+        FROM internal_messages m
+        JOIN accounts ra ON ra.account_id = m.recipient_account_id
+        JOIN employees re ON re.employee_id = ra.employee_id
+        WHERE m.sender_account_id = #{accountId}
+          AND m.sender_deleted_at IS NULL
+        ORDER BY m.created_at DESC
+        LIMIT 100
+    </select>
+
+    <insert id="insertMessage" parameterType="map" useGeneratedKeys="true" keyProperty="messageId">
+        INSERT INTO internal_messages
+            (sender_account_id, recipient_account_id, subject, body)
+        VALUES
+            (#{senderAccountId}, #{recipientAccountId}, #{subject}, #{body})
+    </insert>
+
+    <update id="markMessageRead">
+        UPDATE internal_messages
+        SET read_at = COALESCE(read_at, NOW(6))
+        WHERE message_id = #{messageId}
+          AND recipient_account_id = #{accountId}
+    </update>
+
+    <select id="listNotifications" resultType="map">
+        SELECT notification_id AS notificationId,
+               notification_type AS notificationType,
+               title,
+               message,
+               link_url AS linkUrl,
+               read_at AS readAt,
+               created_at AS createdAt
+        FROM notifications
+        WHERE recipient_account_id = #{accountId}
+        ORDER BY created_at DESC
+        LIMIT 50
+    </select>
+
+    <select id="countUnreadNotifications" resultType="int">
+        SELECT COUNT(*)
+        FROM notifications
+        WHERE recipient_account_id = #{accountId} AND read_at IS NULL
+    </select>
+
+    <update id="markNotificationRead">
+        UPDATE notifications
+        SET read_at = COALESCE(read_at, NOW(6))
+        WHERE notification_id = #{notificationId}
+          AND recipient_account_id = #{accountId}
+    </update>
+
+    <update id="markAllNotificationsRead">
+        UPDATE notifications
+        SET read_at = NOW(6)
+        WHERE recipient_account_id = #{accountId} AND read_at IS NULL
+    </update>
+
+    <!-- Integrated search and My Page -->
+    <select id="integratedSearch" resultType="map">
+        SELECT entityType, entityId, title, subtitle, linkUrl, createdAt
+        FROM (
+            SELECT 'EMPLOYEE' AS entityType,
+                   CAST(e.employee_id AS CHAR) AS entityId,
+                   e.employee_name AS title,
+                   CONCAT_WS(' · ', e.employee_number, d.department_name, p.position_name) AS subtitle,
+                   CONCAT('/employees?keyword=', e.employee_number) AS linkUrl,
+                   e.created_at AS createdAt
+            FROM employees e
+            LEFT JOIN departments d ON d.department_id = e.department_id
+            LEFT JOIN positions p ON p.position_id = e.position_id
+            WHERE e.company_id = #{companyId}
+              AND e.deleted_at IS NULL
+              AND (e.employee_name LIKE CONCAT('%', #{keyword}, '%')
+                   OR e.employee_number LIKE CONCAT('%', #{keyword}, '%')
+                   OR e.email LIKE CONCAT('%', #{keyword}, '%'))
+
+            UNION ALL
+
+            SELECT 'NOTICE', CAST(n.notice_id AS CHAR), n.title,
+                   LEFT(REPLACE(REPLACE(n.content, '\r', ' '), '\n', ' '), 120),
+                   CONCAT('/notices/', n.notice_id), n.created_at
+            FROM notices n
+            WHERE n.company_id = #{companyId}
+              AND n.published = TRUE
+              AND n.deleted_at IS NULL
+              AND (n.title LIKE CONCAT('%', #{keyword}, '%')
+                   OR n.content LIKE CONCAT('%', #{keyword}, '%'))
+
+            UNION ALL
+
+            SELECT 'RESOURCE', CAST(r.resource_id AS CHAR), r.title,
+                   LEFT(COALESCE(r.description, ''), 120),
+                   '/resources', r.created_at
+            FROM resources r
+            WHERE r.company_id = #{companyId}
+              AND r.published = TRUE
+              AND r.deleted_at IS NULL
+              AND (r.title LIKE CONCAT('%', #{keyword}, '%')
+                   OR r.description LIKE CONCAT('%', #{keyword}, '%'))
+
+            UNION ALL
+
+            SELECT 'APPROVAL', CAST(ad.approval_document_id AS CHAR), ad.title,
+                   CONCAT(ad.status, ' · ', de.employee_name),
+                   CONCAT('/approvals/', ad.approval_document_id), ad.created_at
+            FROM approval_documents ad
+            JOIN employees de ON de.employee_id = ad.drafter_employee_id
+            LEFT JOIN approval_lines al ON al.approval_document_id = ad.approval_document_id
+            WHERE ad.company_id = #{companyId}
+              AND ad.deleted_at IS NULL
+              AND ad.title LIKE CONCAT('%', #{keyword}, '%')
+              AND (ad.drafter_employee_id = #{employeeId}
+                   OR al.approver_employee_id = #{employeeId})
+        ) combined
+        ORDER BY createdAt DESC
+        LIMIT 40
+    </select>
+
+    <insert id="insertSearchHistory">
+        INSERT INTO search_histories (account_id, keyword, search_scope, result_count)
+        VALUES (#{accountId}, #{keyword}, 'ALL', #{resultCount})
+    </insert>
+
+    <select id="findMyProfile" resultType="map">
+        SELECT e.employee_id AS employeeId,
+               e.employee_number AS employeeNumber,
+               e.employee_name AS employeeName,
+               e.email,
+               e.phone,
+               e.hire_date AS hireDate,
+               e.employment_status AS employmentStatus,
+               e.employment_type AS employmentType,
+               e.profile_file_id AS profileFileId,
+               d.department_name AS departmentName,
+               p.position_name AS positionName,
+               a.account_id AS accountId,
+               a.login_id AS loginId,
+               a.last_login_at AS lastLoginAt,
+               a.last_login_ip AS lastLoginIp,
+               a.password_changed_at AS passwordChangedAt
+        FROM employees e
+        JOIN accounts a ON a.employee_id = e.employee_id
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        WHERE e.employee_id = #{employeeId}
+          AND e.deleted_at IS NULL
+    </select>
+
+    <select id="findRecentLogins" resultType="map">
+        SELECT success,
+               failure_reason AS failureReason,
+               ip_address AS ipAddress,
+               user_agent AS userAgent,
+               logged_in_at AS loggedInAt
+        FROM login_histories
+        WHERE account_id = #{accountId}
+        ORDER BY logged_in_at DESC
+        LIMIT 10
+    </select>
+
+    <select id="findPasswordHash" resultType="string">
+        SELECT password_hash FROM accounts WHERE account_id = #{accountId}
+    </select>
+
+    <update id="changePassword">
+        UPDATE accounts
+        SET password_hash = #{passwordHash},
+            password_changed_at = NOW(6),
+            must_change_password = FALSE
+        WHERE account_id = #{accountId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="resetEmployeePassword">
+        UPDATE accounts a
+        JOIN employees e ON e.employee_id = a.employee_id
+        SET a.password_hash = #{passwordHash},
+            a.password_changed_at = NOW(6),
+            a.must_change_password = TRUE,
+            a.failed_login_count = 0,
+            a.account_status = 'ACTIVE',
+            a.locked_until = NULL
+        WHERE e.company_id = #{companyId}
+          AND e.employee_id = #{employeeId}
+          AND e.deleted_at IS NULL
+          AND a.deleted_at IS NULL
+    </update>
+
+    <update id="updateProfileFile">
+        UPDATE employees
+        SET profile_file_id = #{fileId}, version = version + 1
+        WHERE employee_id = #{employeeId} AND deleted_at IS NULL
+    </update>
+
+    <!-- Excel exports -->
+    <select id="exportEmployees" resultType="map">
+        SELECT e.employee_number AS employeeNumber,
+               e.employee_name AS employeeName,
+               e.email,
+               e.phone,
+               d.department_name AS departmentName,
+               p.position_name AS positionName,
+               e.hire_date AS hireDate,
+               e.employment_status AS employmentStatus
+        FROM employees e
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        LEFT JOIN positions p ON p.position_id = e.position_id
+        WHERE e.company_id = #{companyId} AND e.deleted_at IS NULL
+        ORDER BY e.employee_number
+    </select>
+
+    <select id="exportLeaves" resultType="map">
+        SELECT e.employee_number AS employeeNumber,
+               e.employee_name AS employeeName,
+               d.department_name AS departmentName,
+               lt.leave_type_name AS leaveTypeName,
+               lr.start_date AS startDate,
+               lr.end_date AS endDate,
+               lr.requested_days AS requestedDays,
+               lr.status,
+               lr.reason
+        FROM leave_requests lr
+        JOIN employees e ON e.employee_id = lr.employee_id
+        LEFT JOIN departments d ON d.department_id = e.department_id
+        JOIN leave_types lt ON lt.leave_type_id = lr.leave_type_id
+        WHERE e.company_id = #{companyId}
+        ORDER BY lr.start_date DESC
+    </select>
+
+    <select id="exportNotices" resultType="map">
+        SELECT n.title,
+               nc.category_name AS categoryName,
+               e.employee_name AS authorName,
+               n.view_count AS viewCount,
+               n.published_at AS publishedAt
+        FROM notices n
+        LEFT JOIN notice_categories nc ON nc.notice_category_id = n.notice_category_id
+        JOIN accounts a ON a.account_id = n.author_account_id
+        JOIN employees e ON e.employee_id = a.employee_id
+        WHERE n.company_id = #{companyId} AND n.deleted_at IS NULL
+        ORDER BY n.created_at DESC
+    </select>
+
+    <insert id="insertAuditLog" parameterType="map">
+        INSERT INTO audit_logs
+            (company_id, actor_account_id, action_type, entity_type, entity_id,
+             description, request_method, request_uri, ip_address, occurred_at)
+        VALUES
+            (#{companyId}, #{actorAccountId}, #{actionType}, #{entityType}, #{entityId},
+             #{description}, #{requestMethod}, #{requestUri}, #{ipAddress}, NOW(6))
+    </insert>
+
+</mapper>

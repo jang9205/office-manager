@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('연차관리', ~{::main})}">
+<main>
+    <section class="page-heading">
+        <div><h2>연차 현황</h2><p>사용 가능한 연차를 확인하고 휴가를 신청하세요.</p></div>
+        <div class="page-actions"><a class="button secondary" th:if="${isAdmin}" th:href="@{/excel/leaves}">↓ 엑셀 다운로드</a><button class="button primary" data-modal-open="leaveModal">＋ 휴가 신청</button></div>
+    </section>
+
+    <section class="grid leave-layout">
+        <aside class="summary-box">
+            <p th:text="${balance.balanceYear != null ? balance.balanceYear + '년 연차' : '올해 연차'}">2026년 연차</p>
+            <strong><span th:text="${balance.availableDays}">15</span><small>일</small></strong>
+            <small>현재 신청 가능한 잔여 연차</small>
+            <div class="balance-grid"><div><span>발생</span><b th:text="${balance.grantedDays + '일'}">15일</b></div><div><span>사용</span><b th:text="${balance.usedDays + '일'}">0일</b></div><div><span>승인 대기</span><b th:text="${balance.pendingDays + '일'}">0일</b></div></div>
+        </aside>
+
+        <article class="card">
+            <header class="card-header"><div><h3>휴가 신청 내역</h3><p th:text="${leaveRequests.totalElements + '건의 신청 내역'}">0건</p></div>
+                <form th:action="@{/leaves}" method="get"><select name="status" onchange="this.form.submit()"><option value="">전체 상태</option><option value="PENDING" th:selected="${status == 'PENDING'}">승인 대기</option><option value="APPROVED" th:selected="${status == 'APPROVED'}">승인</option><option value="REJECTED" th:selected="${status == 'REJECTED'}">반려</option></select></form>
+            </header>
+            <div class="table-wrap"><table><thead><tr><th>신청자</th><th>종류</th><th>기간</th><th>일수</th><th>상태</th><th>신청일</th></tr></thead><tbody>
+            <tr th:each="item : ${leaveRequests.content}"><td><strong th:text="${item.employeeName}">이사원</strong><br><small th:text="${item.departmentName ?: '-'}">개발팀</small></td><td th:text="${item.leaveTypeName}">연차</td><td><span th:text="${@viewDate.format(item.startDate,'yyyy.MM.dd')}">시작</span><span th:if="${item.startDate != item.endDate}" th:text="${' ~ ' + @viewDate.format(item.endDate,'MM.dd')}"></span></td><td th:text="${item.requestedDays + '일'}">1일</td><td><a th:href="@{/approvals/{id}(id=${item.approvalDocumentId})}" class="status" th:classappend="${#strings.toLowerCase(item.status)}" th:text="${item.status == 'PENDING' ? '승인 대기' : (item.status == 'APPROVED' ? '승인' : (item.status == 'REJECTED' ? '반려' : item.status))}">대기</a></td><td th:text="${item.submittedAt == null ? '-' : @viewDate.format(item.submittedAt,'M.d HH:mm')}">-</td></tr>
+            </tbody></table></div>
+            <div class="empty-state" th:if="${#lists.isEmpty(leaveRequests.content)}"><div class="empty-icon">☀</div><strong>휴가 신청 내역이 없습니다</strong><p>필요한 휴가를 신청해 보세요.</p></div>
+            <nav class="pagination" th:if="${leaveRequests.totalPages() > 1}"><a th:classappend="${!leaveRequests.hasPrevious()} ? 'disabled'" th:href="@{/leaves(page=${leaveRequests.page - 1},status=${status})}">‹</a><span class="current" th:text="${leaveRequests.page}">1</span><span th:text="${'/' + leaveRequests.totalPages()}">/1</span><a th:classappend="${!leaveRequests.hasNext()} ? 'disabled'" th:href="@{/leaves(page=${leaveRequests.page + 1},status=${status})}">›</a></nav>
+        </article>
+    </section>
+
+    <div class="modal" id="leaveModal"><div class="modal-dialog"><header class="modal-header"><div><h3>휴가 신청</h3><p>신청 즉시 부서장과 관리자 결재선에 등록됩니다.</p></div><button class="modal-close" data-modal-close>×</button></header><form th:action="@{/api/v1/leaves}" method="post" data-json-form data-success-url="/leaves"><div class="modal-body form-grid"><div class="field"><label>휴가 종류 *</label><select name="leaveTypeId" required><option value="">선택</option><option th:each="type : ${leaveTypes}" th:value="${type.leaveTypeId}" th:text="${type.leaveTypeName}"></option></select></div><div class="field"><label>사용 단위 *</label><select name="leaveUnit" required><option value="DAY">종일</option><option value="HALF_AM">오전 반차</option><option value="HALF_PM">오후 반차</option></select></div><div class="field"><label>시작일 *</label><input type="date" name="startDate" th:min="${currentDate}" required></div><div class="field"><label>종료일 *</label><input type="date" name="endDate" th:min="${currentDate}" required></div><div class="field span-2"><label>사유 *</label><textarea name="reason" required maxlength="1000" placeholder="휴가 사유를 입력하세요"></textarea></div></div><footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">결재 요청</button></footer></form></div></div>
+</main>
+</html>

@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('통합검색', ~{::main})}">
+<main>
+    <section class="page-heading"><div><h2>통합검색</h2><p>사원, 공지, 자료와 결재 문서를 한 번에 찾습니다.</p></div></section>
+    <form class="filter-form" th:action="@{/search}" method="get" style="margin-bottom:16px"><input style="min-width:min(520px,100%)" type="search" name="q" th:value="${query}" minlength="2" placeholder="두 글자 이상 입력하세요" autofocus><button class="button primary">검색</button></form>
+    <article class="card"><header class="card-header" th:if="${query != null}"><div><h3><span th:text="${'“' + query + '”'}">검색어</span> 검색 결과</h3><p th:text="${#lists.size(results) + '건을 찾았습니다.'}">0건</p></div></header><div><a class="search-result" th:each="item : ${results}" th:href="${item.linkUrl}"><span class="type-chip" th:text="${item.entityType}">NOTICE</span><span class="list-copy"><strong th:text="${item.title}">제목</strong><small th:text="${item.subtitle}">설명</small></span><span class="list-meta" th:text="${item.createdAt == null ? '' : @viewDate.format(item.createdAt,'yyyy.MM.dd')}">날짜</span></a></div><div class="empty-state" th:if="${query != null and #lists.isEmpty(results)}"><div class="empty-icon">⌕</div><strong>검색 결과가 없습니다</strong><p>다른 키워드로 검색해 보세요.</p></div><div class="empty-state" th:if="${query == null}"><div class="empty-icon">⌕</div><strong>무엇을 찾고 계신가요?</strong><p>사원 이름, 공지 제목, 자료명 또는 결재 제목을 검색하세요.</p></div></article>
+</main>
+</html>

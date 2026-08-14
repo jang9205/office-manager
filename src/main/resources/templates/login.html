@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로그인 · Workly</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body class="login-body">
+<main class="login-shell">
+    <section class="login-brand-panel">
+        <div class="login-brand-copy">
+            <a class="brand" href="#"><span class="brand-mark">W</span><span><strong>Workly</strong><small>Office Manager</small></span></a>
+            <p class="login-kicker">SMART WORKSPACE</p>
+            <h1>일하는 모든 순간을<br>하나의 흐름으로.</h1>
+            <p>사원관리부터 연차, 전자결재와 근태까지<br>깔끔하고 안전한 업무관리 시스템입니다.</p>
+        </div>
+        <div class="login-preview-card"><div><span class="preview-dot"></span><span>오늘의 업무 현황</span></div><strong>결재와 일정을 놓치지 마세요</strong><div class="preview-stats"><span><b>08:57</b><small>오늘 출근</small></span><span><b>3건</b><small>결재 대기</small></span><span><b>2명</b><small>오늘 휴가</small></span></div></div>
+    </section>
+    <section class="login-form-panel">
+        <div class="login-form-wrap">
+            <div class="mobile-login-logo"><span class="brand-mark">W</span><strong>Workly</strong></div>
+            <p class="eyebrow">WELCOME BACK</p>
+            <h2>안녕하세요!</h2>
+            <p class="login-description">업무를 시작하려면 계정으로 로그인하세요.</p>
+            <div class="login-alert error" th:if="${param.error}">아이디 또는 비밀번호를 확인하세요. 5회 실패하면 계정이 30분간 잠깁니다.</div>
+            <div class="login-alert success" th:if="${param.logout}">안전하게 로그아웃되었습니다.</div>
+            <form th:action="@{/login}" method="post" class="login-form">
+                <div class="field"><label>아이디</label><div class="input-with-icon"><span>●</span><input name="username" autocomplete="username" autofocus required placeholder="아이디를 입력하세요"></div></div>
+                <div class="field"><label>비밀번호</label><div class="input-with-icon"><span>◆</span><input type="password" name="password" autocomplete="current-password" required placeholder="비밀번호를 입력하세요"></div></div>
+                <label class="remember-row"><span><input type="checkbox" name="remember-me"> 로그인 상태 유지</span><small>비밀번호를 잊으셨나요?</small></label>
+                <button class="button primary login-button" type="submit">로그인</button>
+            </form>
+            <div class="demo-accounts"><p>포트폴리오 데모 계정</p><div><button type="button" data-demo-login="admin" data-demo-password="admin1234!"><strong>관리자</strong><small>admin</small></button><button type="button" data-demo-login="manager" data-demo-password="manager1234!"><strong>팀장</strong><small>manager</small></button><button type="button" data-demo-login="employee" data-demo-password="employee1234!"><strong>사원</strong><small>employee</small></button></div></div>
+            <p class="login-footer">© 2026 Workly. Portfolio project.</p>
+        </div>
+    </section>
+</main>
+<script th:src="@{/js/login.js}"></script>
+</body>
+</html>

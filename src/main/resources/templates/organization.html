@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      th:replace="~{fragments/layout :: shell('조직관리', ~{::main})}">
+<main>
+    <svg class="svg-sprite" aria-hidden="true">
+        <symbol id="position-default" viewBox="0 0 24 24">
+            <rect x="4" y="5" width="16" height="15" rx="2.5"></rect>
+            <path d="M9 5V3.5h6V5M8 10h8M8 14h5"></path>
+        </symbol>
+        <symbol id="position-staff" viewBox="0 0 24 24">
+            <circle cx="12" cy="8" r="3.5"></circle>
+            <path d="M5 20c.7-4 3.1-6 7-6s6.3 2 7 6"></path>
+        </symbol>
+        <symbol id="position-senior" viewBox="0 0 24 24">
+            <rect x="4" y="3.5" width="16" height="17" rx="2.5"></rect>
+            <circle cx="9" cy="10" r="2"></circle>
+            <path d="M6.5 16c.4-2 1.3-3 2.5-3s2.1 1 2.5 3M14 9h3.5M14 13h3.5"></path>
+        </symbol>
+        <symbol id="position-assistant" viewBox="0 0 24 24">
+            <rect x="3" y="7" width="18" height="13" rx="2.5"></rect>
+            <path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18M10 12v2h4v-2"></path>
+        </symbol>
+        <symbol id="position-manager" viewBox="0 0 24 24">
+            <circle cx="9" cy="8" r="3"></circle>
+            <path d="M3.5 19c.5-3.5 2.3-5.5 5.5-5.5s5 2 5.5 5.5M15 6.5a2.7 2.7 0 0 1 0 5.2M15.5 14c2.8.3 4.5 2 5 5"></path>
+        </symbol>
+        <symbol id="position-deputy" viewBox="0 0 24 24">
+            <rect x="8" y="3" width="8" height="5" rx="1.5"></rect>
+            <rect x="3" y="16" width="7" height="5" rx="1.5"></rect>
+            <rect x="14" y="16" width="7" height="5" rx="1.5"></rect>
+            <path d="M12 8v4M6.5 16v-4h11v4"></path>
+        </symbol>
+        <symbol id="position-general" viewBox="0 0 24 24">
+            <path d="M5 21V4.5A1.5 1.5 0 0 1 6.5 3h8A1.5 1.5 0 0 1 16 4.5V21M16 9h2.5a1.5 1.5 0 0 1 1.5 1.5V21M3 21h18"></path>
+            <path d="M8 7h2M12 7h1M8 11h2M12 11h1M8 15h2M12 15h1M9 21v-3h3v3"></path>
+        </symbol>
+    </svg>
+    <section class="page-heading"><div><h2>조직 및 직급</h2><p>회사 조직도와 직급 체계를 관리합니다.</p></div></section>
+    <section class="grid grid-2">
+        <article class="card">
+            <header class="card-header"><div><h3>부서</h3><p th:text="${#lists.size(departments) + '개 부서'}">4개 부서</p></div><button sec:authorize="hasAuthority('ORGANIZATION:MANAGE')" class="button primary small" data-modal-open="departmentModal" data-new-department>＋ 부서 추가</button></header>
+            <div class="list">
+                <div class="list-item" th:each="department : ${departments}" th:classappend="${department.departmentId == departmentId} ? ' selected'">
+                    <a class="organization-select" th:href="@{/organization(departmentId=${department.departmentId})}"><span class="list-icon">⌘</span><span class="list-copy"><strong th:text="${department.departmentName}">개발팀</strong><small><span th:text="${department.departmentCode}">DEV</span> · 팀장 <span th:text="${department.leaderName ?: '미지정'}">박팀장</span></small></span><span class="list-meta" th:text="${department.employeeCount + '명'}">2명</span></a>
+                    <div class="row-actions" sec:authorize="hasAuthority('ORGANIZATION:MANAGE')"><button class="button secondary small" data-edit-department data-modal-open="departmentModal" th:attr="data-id=${department.departmentId},data-code=${department.departmentCode},data-name=${department.departmentName},data-parent=${department.parentDepartmentId},data-leader=${department.leaderEmployeeId},data-description=${department.description},data-order=${department.sortOrder}">수정</button><button class="button danger small" th:attr="data-api-action=@{/api/v1/admin/departments/{id}(id=${department.departmentId})}" data-method="DELETE" data-confirm="소속 사원이 없는 부서만 삭제할 수 있습니다. 삭제할까요?">삭제</button></div>
+                </div>
+            </div>
+        </article>
+        <article class="card">
+            <header class="card-header"><div><h3>직급</h3><p th:text="${#lists.size(positions) + '개 직급'}">6개 직급</p></div><button sec:authorize="hasAuthority('ORGANIZATION:MANAGE')" class="button primary small" data-modal-open="positionModal" data-new-position>＋ 직급 추가</button></header>
+            <div class="list">
+                <div class="list-item" th:each="position : ${positions}" th:classappend="${position.positionId == positionId} ? ' selected'">
+                    <a class="organization-select" th:href="@{/organization(positionId=${position.positionId})}">
+                    <span class="list-icon position-icon" aria-hidden="true" th:title="${position.positionName}">
+                        <svg class="position-icon-svg" viewBox="0 0 24 24">
+                            <use th:href="${#lists.contains({'STAFF','SENIOR','ASSISTANT','MANAGER','DEPUTY','GENERAL'}, position.positionCode) ? '#position-' + #strings.toLowerCase(position.positionCode) : '#position-default'}"
+                                 href="#position-default"></use>
+                        </svg>
+                    </span><span class="list-copy"><strong th:text="${position.positionName}">사원</strong><small th:text="${position.positionCode}">STAFF</small></span><span class="list-meta" th:text="${position.employeeCount + '명'}">1명</span></a>
+                    <div class="row-actions" sec:authorize="hasAuthority('ORGANIZATION:MANAGE')"><button class="button secondary small" data-edit-position data-modal-open="positionModal" th:attr="data-id=${position.positionId},data-code=${position.positionCode},data-name=${position.positionName},data-level=${position.positionLevel},data-order=${position.sortOrder}">수정</button><button class="button danger small" th:attr="data-api-action=@{/api/v1/admin/positions/{id}(id=${position.positionId})}" data-method="DELETE" data-confirm="사용 중이지 않은 직급만 삭제할 수 있습니다. 삭제할까요?">삭제</button></div>
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <article class="card organization-employees" th:if="${organizationEmployees != null}">
+        <header class="card-header"><div><h3 th:text="${selectedOrganizationName + ' 직원'}">선택 항목 직원</h3><p th:text="${organizationEmployees.totalElements + '명이 조회되었습니다.'}">0명이 조회되었습니다.</p></div><a class="button secondary small" th:href="@{/organization}">선택 해제</a></header>
+        <div class="table-wrap" th:unless="${#lists.isEmpty(organizationEmployees.content)}"><table><thead><tr><th>직원</th><th>부서</th><th>직급</th><th>연락처</th><th>입사일</th><th>상태</th></tr></thead><tbody>
+        <tr th:each="employee : ${organizationEmployees.content}"><td><div class="table-person"><span class="mini-avatar" th:text="${#strings.substring(employee.employeeName,0,1)}">김</span><span><strong th:text="${employee.employeeName}">김사원</strong><small th:text="${employee.employeeNumber}">E0001</small></span></div></td><td th:text="${employee.departmentName ?: '-'}">개발팀</td><td th:text="${employee.positionName ?: '-'}">사원</td><td><span th:text="${employee.email}">mail@example.com</span><br><small th:text="${employee.phone ?: '-'}">-</small></td><td th:text="${@viewDate.format(employee.hireDate,'yyyy.MM.dd')}">2026.01.01</td><td><span class="status" th:classappend="${#strings.toLowerCase(employee.employmentStatus)}" th:text="${employee.employmentStatus == 'ACTIVE' ? '재직' : (employee.employmentStatus == 'RESIGNED' ? '퇴사' : '휴직')}">재직</span></td></tr>
+        </tbody></table></div>
+        <div class="empty-state" th:if="${#lists.isEmpty(organizationEmployees.content)}"><div class="empty-icon">👤</div><strong>해당 직원이 없습니다</strong><p>선택한 부서 또는 직급에 등록된 직원을 찾지 못했습니다.</p></div>
+        <nav class="pagination" th:if="${organizationEmployees.totalPages() > 1}"><a th:classappend="${!organizationEmployees.hasPrevious()} ? 'disabled'" th:href="@{/organization(page=${organizationEmployees.page - 1},departmentId=${departmentId},positionId=${positionId})}">‹</a><span class="current" th:text="${organizationEmployees.page}">1</span><span th:text="${'/' + organizationEmployees.totalPages()}">/1</span><a th:classappend="${!organizationEmployees.hasNext()} ? 'disabled'" th:href="@{/organization(page=${organizationEmployees.page + 1},departmentId=${departmentId},positionId=${positionId})}">›</a></nav>
+    </article>
+
+    <div class="modal" id="departmentModal"><div class="modal-dialog"><header class="modal-header"><div><h3 data-department-modal-title>부서 추가</h3><p>조직 정보와 부서장을 설정합니다.</p></div><button class="modal-close" data-modal-close>×</button></header><form id="departmentForm" th:action="@{/api/v1/admin/departments}" method="post" data-json-form data-success-url="/organization"><div class="modal-body form-grid"><div class="field"><label>부서 코드 *</label><input name="departmentCode" required maxlength="30"></div><div class="field"><label>부서명 *</label><input name="departmentName" required maxlength="100"></div><div class="field"><label>상위 부서</label><select name="parentDepartmentId"><option value="">없음</option><option th:each="item : ${departments}" th:value="${item.departmentId}" th:text="${item.departmentName}"></option></select></div><div class="field"><label>부서장</label><select name="leaderEmployeeId"><option value="">미지정</option><option th:each="item : ${employeeOptions}" th:value="${item.employeeId}" th:text="${item.employeeName + ' · ' + (item.positionName ?: '-')}"></option></select></div><div class="field"><label>정렬 순서</label><input type="number" name="sortOrder" value="0"></div><div class="field span-2"><label>설명</label><textarea name="description"></textarea></div></div><footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">저장</button></footer></form></div></div>
+    <div class="modal" id="positionModal"><div class="modal-dialog"><header class="modal-header"><div><h3 data-position-modal-title>직급 추가</h3><p>직급 코드와 레벨을 설정합니다.</p></div><button class="modal-close" data-modal-close>×</button></header><form id="positionForm" th:action="@{/api/v1/admin/positions}" method="post" data-json-form data-success-url="/organization"><div class="modal-body form-grid"><div class="field"><label>직급 코드 *</label><input name="positionCode" required maxlength="30"></div><div class="field"><label>직급명 *</label><input name="positionName" required maxlength="50"></div><div class="field"><label>직급 레벨 *</label><input type="number" name="positionLevel" min="1" required></div><div class="field"><label>정렬 순서</label><input type="number" name="sortOrder" value="0"></div></div><footer class="modal-footer"><button type="button" class="button secondary" data-modal-close>취소</button><button class="button primary" type="submit">저장</button></footer></form></div></div>
+</main>
+</html>
